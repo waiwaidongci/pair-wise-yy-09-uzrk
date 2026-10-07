@@ -1,17 +1,25 @@
-import { For, createSignal } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import { Select } from "@kobalte/core/select";
 import { useTokenStore } from "../stores/tokenStore";
 import { downloadText, parseImportedTheme, toCssVariables, toSassVariables, toStyleDictionaryJson } from "../utils/exporters";
-import type { Theme } from "../types/tokens";
+import { issueLabel } from "../utils/resolve";
+import type { Theme, TokenIssue } from "../types/tokens";
 
 export default function ThemeToolbar() {
   const store = useTokenStore();
   const [format, setFormat] = createSignal("json");
   const [importOpen, setImportOpen] = createSignal(false);
   const [importText, setImportText] = createSignal("");
+  const [exportIssues, setExportIssues] = createSignal<TokenIssue[] | null>(null);
 
   const exportCurrent = () => {
     const theme = store.activeTheme();
+    const issues = store.resolvedActiveTheme().issues;
+    if (issues.length) {
+      // 引用成环、类型不符或目标缺失：列出问题令牌并停下，不导出
+      setExportIssues(issues);
+      return;
+    }
     if (format() === "css") {
       downloadText(`${theme.id}.css`, toCssVariables(theme), "text/css");
     } else if (format() === "scss") {
@@ -106,6 +114,35 @@ export default function ThemeToolbar() {
           </div>
         </div>
       )}
+
+      <Show when={exportIssues()}>
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" onClick={() => setExportIssues(null)}>
+          <div class="w-full max-w-lg rounded-xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-slate-900">无法导出：存在引用问题</h3>
+                <p class="mt-1 text-xs text-slate-500">请先修复以下问题令牌，导出已暂停。</p>
+              </div>
+            </div>
+            <ul class="mt-4 max-h-72 space-y-2 overflow-auto">
+              <For each={exportIssues()}>
+                {(issue) => (
+                  <li class="rounded-lg border border-rose-100 bg-rose-50/60 px-3 py-2">
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">{issueLabel(issue.kind)}</span>
+                      <code class="font-mono text-xs font-semibold text-slate-800">{issue.tokenName}</code>
+                    </div>
+                    <p class="mt-1 text-xs text-slate-600">{issue.message}</p>
+                  </li>
+                )}
+              </For>
+            </ul>
+            <div class="mt-4 flex justify-end">
+              <button class="rounded-lg border px-4 py-2 text-sm" onClick={() => setExportIssues(null)}>知道了</button>
+            </div>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 }

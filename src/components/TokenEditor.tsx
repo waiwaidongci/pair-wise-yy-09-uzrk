@@ -2,6 +2,7 @@ import { For, Show, createMemo } from "solid-js";
 import { Tabs } from "@kobalte/core/tabs";
 import type { DesignToken, TokenKind } from "../types/tokens";
 import { TOKEN_LABELS } from "../utils/exporters";
+import { issueLabel } from "../utils/resolve";
 import { contrastGrade, contrastRatio } from "../utils/color";
 import { useTokenStore } from "../stores/tokenStore";
 
@@ -12,9 +13,18 @@ function TokenRow(props: { token: DesignToken; kind: TokenKind }) {
   const isColor = () => props.kind === "color";
   const ratio = createMemo(() => {
     if (!isColor()) return 0;
-    const background = store.activeTheme().tokens.color.find((token) => token.id === "color-surface")?.value ?? "#fff";
-    return contrastRatio(props.token.value, background);
+    const values = store.resolvedActiveTheme().values;
+    const background = values["color-surface"] ?? "#fff";
+    return contrastRatio(values[props.token.id] ?? props.token.value, background);
   });
+
+  const issue = createMemo(() => store.resolvedActiveTheme().issues.find((item) => item.tokenId === props.token.id));
+
+  const refOptions = createMemo(() =>
+    store.activeTheme().tokens[props.kind]
+      .filter((token) => token.id !== props.token.id)
+      .map((token) => token.name),
+  );
 
   return (
     <div class="grid grid-cols-[minmax(150px,1.2fr)_minmax(110px,0.8fr)_32px] gap-3 border-b border-slate-100 px-3 py-3 last:border-0">
@@ -25,6 +35,37 @@ function TokenRow(props: { token: DesignToken; kind: TokenKind }) {
           onInput={(event) => store.updateToken(props.kind, props.token.id, { name: event.currentTarget.value })}
         />
         <p class="mt-1 line-clamp-1 px-2 text-[11px] text-slate-400">{props.token.description}</p>
+        <div class="mt-1.5 flex flex-wrap items-center gap-1.5 px-2">
+          <Show
+            when={props.token.ref}
+            fallback={<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">基础令牌</span>}
+          >
+            <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700" title={`引用 ${props.token.ref}`}>
+              引用 → {props.token.ref}
+            </span>
+            <Show when={props.token.overridden}>
+              <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">已覆盖</span>
+            </Show>
+            <Show when={props.token.needsReview}>
+              <span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">待复核</span>
+            </Show>
+          </Show>
+          <Show when={issue()}>
+            <span class="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700" title={issue()?.message}>
+              {issueLabel(issue()!.kind)}
+            </span>
+          </Show>
+        </div>
+        <div class="mt-1.5 px-2">
+          <select
+            class="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] outline-none focus:border-blue-400"
+            value={props.token.ref ?? ""}
+            onChange={(event) => store.updateToken(props.kind, props.token.id, { ref: event.currentTarget.value || undefined })}
+          >
+            <option value="">无引用（基础令牌）</option>
+            <For each={refOptions()}>{(name) => <option value={name}>{name}</option>}</For>
+          </select>
+        </div>
       </div>
       <div class="flex items-center gap-2">
         <Show when={isColor()}>

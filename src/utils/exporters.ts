@@ -1,4 +1,5 @@
 import type { DesignToken, Theme, TokenDifference, TokenKind } from "../types/tokens";
+import { resolveTheme } from "./resolve";
 
 export const TOKEN_LABELS: Record<TokenKind, string> = {
   color: "颜色",
@@ -9,11 +10,13 @@ export const TOKEN_LABELS: Record<TokenKind, string> = {
   motion: "动效时长",
 };
 
+/** 按令牌名称读取解析后的有效值（预览、差异、导出共用同一份解析结果） */
 export function flattenTheme(theme: Theme): Record<string, string> {
+  const { values } = resolveTheme(theme);
   const result: Record<string, string> = {};
   (Object.keys(theme.tokens) as TokenKind[]).forEach((kind) => {
     theme.tokens[kind].forEach((token) => {
-      result[token.name] = token.value;
+      result[token.name] = values[token.id] ?? token.value;
     });
   });
   return result;
@@ -36,6 +39,7 @@ export function toSassVariables(theme: Theme): string {
 }
 
 export function toStyleDictionaryJson(theme: Theme): string {
+  const { values } = resolveTheme(theme);
   const tree: Record<string, unknown> = {};
   (Object.keys(theme.tokens) as TokenKind[]).forEach((kind) => {
     theme.tokens[kind].forEach((token) => {
@@ -44,7 +48,7 @@ export function toStyleDictionaryJson(theme: Theme): string {
       path.forEach((segment, index) => {
         if (index === path.length - 1) {
           branch[segment] = {
-            value: token.value,
+            value: values[token.id] ?? token.value,
             type: kind === "motion" ? "time" : kind === "fontSize" ? "dimension" : kind,
             comment: token.description,
           };
