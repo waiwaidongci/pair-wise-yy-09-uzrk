@@ -1,4 +1,5 @@
 import type { DesignToken, Theme, TokenDifference, TokenKind } from "../types/tokens";
+import { migrateTheme, resolveTheme } from "./resolver";
 
 export const TOKEN_LABELS: Record<TokenKind, string> = {
   color: "颜色",
@@ -9,14 +10,9 @@ export const TOKEN_LABELS: Record<TokenKind, string> = {
   motion: "动效时长",
 };
 
+/** 扁平化主题：统一走引用解析，预览、差异与导出读取同一份结果 */
 export function flattenTheme(theme: Theme): Record<string, string> {
-  const result: Record<string, string> = {};
-  (Object.keys(theme.tokens) as TokenKind[]).forEach((kind) => {
-    theme.tokens[kind].forEach((token) => {
-      result[token.name] = token.value;
-    });
-  });
-  return result;
+  return resolveTheme(theme).flat;
 }
 
 export function toCssVariables(theme: Theme): string {
@@ -71,11 +67,11 @@ export function downloadText(filename: string, content: string, mime = "text/pla
 export function parseImportedTheme(raw: string, fallback: Theme): Theme {
   const parsed = JSON.parse(raw) as Partial<Theme> | Record<string, string>;
   if ("tokens" in parsed && parsed.tokens) {
-    return {
+    return migrateTheme({
       id: `imported-${Date.now()}`,
       name: parsed.name ?? "导入主题",
       tokens: parsed.tokens as Theme["tokens"],
-    };
+    });
   }
 
   const imported = parsed as Record<string, string>;
@@ -83,10 +79,12 @@ export function parseImportedTheme(raw: string, fallback: Theme): Theme {
   next.id = `imported-${Date.now()}`;
   next.name = "导入的令牌集";
   (Object.keys(next.tokens) as TokenKind[]).forEach((kind) => {
-    next.tokens[kind] = next.tokens[kind].map((token) => ({
-      ...token,
-      value: token.name in imported ? imported[token.name] : token.value,
-    }));
+    next.tokens[kind] = next.tokens[kind].map((token) => {
+      if (!(token.name in imported)) return token;
+      const value = imported[token.name];
+      // 覆盖到带引用的令牌上时，按显式覆盖处理，保留引用关系
+      return token.ref ? { ...token, value, override: true, needsReview: false } : { ...token, value };
+    });
   });
   return next;
 }

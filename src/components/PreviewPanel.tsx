@@ -5,17 +5,13 @@ import { useTokenStore } from "../stores/tokenStore";
 
 export default function PreviewPanel() {
   const store = useTokenStore();
-  const value = (id: string, fallback: string) => {
-    for (const tokens of Object.values(store.activeTheme().tokens)) {
-      const found = tokens.find((token) => token.id === id);
-      if (found) return found.value;
-    }
-    return fallback;
-  };
+  // 预览与差异、导出读取同一份解析结果
+  const value = (id: string, fallback: string) => store.resolvedActive().byId[id]?.resolvedValue ?? fallback;
 
   const ratio = createMemo(() => contrastRatio(value("color-text", "#172033"), value("color-surface", "#fff")));
   const cssVars = createMemo(() => ({
     "--preview-brand": value("color-brand", "#356ae6"),
+    "--preview-button-bg": value("color-button-bg", value("color-brand", "#356ae6")),
     "--preview-surface": value("color-surface", "#fff"),
     "--preview-text": value("color-text", "#172033"),
     "--preview-muted": value("color-muted", "#68738a"),
@@ -24,7 +20,7 @@ export default function PreviewPanel() {
     "--preview-radius": value("radius-md", "8px"),
     "--preview-shadow": value("shadow-sm", "0 1px 2px rgb(22 32 51 / 0.08)"),
     "--preview-space": value("space-4", "16px"),
-    "--preview-font": value("font-md", "16px"),
+    "--preview-font": value("font-body", value("font-md", "16px")),
     "--preview-motion": value("motion-base", "220ms"),
   }));
 
@@ -60,7 +56,7 @@ export default function PreviewPanel() {
                 </div>
                 <button
                   class="rounded-lg px-4 py-2 text-sm font-bold text-white transition hover:translate-y-[-1px]"
-                  style={{ background: "var(--preview-brand)", "border-radius": "var(--preview-radius)", "transition-duration": "var(--preview-motion)" }}
+                  style={{ background: "var(--preview-button-bg)", "border-radius": "var(--preview-radius)", "transition-duration": "var(--preview-motion)" }}
                 >
                   新建批次
                 </button>
@@ -136,7 +132,7 @@ export default function PreviewPanel() {
               </div>
               <div class="mt-6 flex justify-end gap-2">
                 <button class="border px-4 py-2 text-sm font-semibold" style={{ "border-radius": "var(--preview-radius)" }}>取消</button>
-                <button class="px-4 py-2 text-sm font-bold text-white" style={{ background: "var(--preview-brand)", "border-radius": "var(--preview-radius)" }}>提交批次</button>
+                <button class="px-4 py-2 text-sm font-bold text-white" style={{ background: "var(--preview-button-bg)", "border-radius": "var(--preview-radius)" }}>提交批次</button>
               </div>
             </div>
           </Tabs.Content>

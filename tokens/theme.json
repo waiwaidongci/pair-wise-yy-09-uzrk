@@ -11,6 +11,33 @@
         "value": "#ffffff",
         "type": "color"
       }
+    },
+    "action": {
+      "primary": {
+        "value": "#356ae6",
+        "type": "color",
+        "comment": "语义令牌，解析自 color.brand.primary"
+      }
+    },
+    "button": {
+      "background": {
+        "value": "#356ae6",
+        "type": "color",
+        "comment": "组件别名，解析自 color.action.primary"
+      }
+    }
+  },
+  "font": {
+    "size": {
+      "md": {
+        "value": "16px",
+        "type": "dimension"
+      }
+    },
+    "body": {
+      "value": "16px",
+      "type": "dimension",
+      "comment": "语义令牌，解析自 font.size.md"
     }
   },
   "space": {

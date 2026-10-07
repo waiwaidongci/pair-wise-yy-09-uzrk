@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal } from "solid-js";
 import type { DesignToken, Snapshot, Theme, TokenKind } from "../types/tokens";
+import { findOverrideDependents, migrateTheme, resolveTheme, TOKEN_KINDS } from "../utils/resolver";
 
 const STORAGE_KEY = "token-forge-workspace-v1";
 
@@ -11,6 +12,9 @@ const makeTokens = (): Theme["tokens"] => ({
     { id: "color-muted", name: "color.text.muted", value: "#68738a", description: "次级说明文字" },
     { id: "color-success", name: "color.status.success", value: "#16845b", description: "成功状态" },
     { id: "color-danger", name: "color.status.danger", value: "#c53b4d", description: "错误与危险状态" },
+    { id: "color-action-primary", name: "color.action.primary", value: "#356ae6", description: "语义：主要操作，引用品牌主色", ref: "color.brand.primary" },
+    { id: "color-action-danger", name: "color.action.danger", value: "#c53b4d", description: "语义：危险操作，引用危险状态色", ref: "color.status.danger" },
+    { id: "color-button-bg", name: "color.button.background", value: "#356ae6", description: "组件别名：主按钮背景", ref: "color.action.primary" },
   ],
   fontSize: [
     { id: "font-xs", name: "font.size.xs", value: "12px", description: "辅助标签" },
@@ -18,6 +22,7 @@ const makeTokens = (): Theme["tokens"] => ({
     { id: "font-md", name: "font.size.md", value: "16px", description: "正文" },
     { id: "font-lg", name: "font.size.lg", value: "20px", description: "区块标题" },
     { id: "font-xl", name: "font.size.xl", value: "28px", description: "页面标题" },
+    { id: "font-body", name: "font.body", value: "16px", description: "语义：正文字号，引用 font.size.md", ref: "font.size.md" },
   ],
   spacing: [
     { id: "space-1", name: "space.1", value: "4px", description: "最小间距" },
@@ -80,7 +85,15 @@ function readPersisted(): PersistedState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as PersistedState;
-    return parsed.themes?.length ? parsed : fallback;
+    if (!parsed.themes?.length) return fallback;
+    // 旧数据没有引用信息，按现值升级；已有主题和快照继续能打开
+    return {
+      themes: parsed.themes.map(migrateTheme),
+      activeThemeId: parsed.themes.some((theme) => theme.id === parsed.activeThemeId)
+        ? parsed.activeThemeId
+        : parsed.themes[0].id,
+      snapshots: (parsed.snapshots ?? []).map((snapshot) => ({ ...snapshot, theme: migrateTheme(snapshot.theme) })),
+    };
   } catch {
     return fallback;
   }
@@ -92,6 +105,8 @@ const [activeThemeId, setActiveThemeId] = createSignal(initial.activeThemeId);
 const [snapshots, setSnapshots] = createSignal<Snapshot[]>(initial.snapshots);
 
 const activeTheme = createMemo(() => themes().find((theme) => theme.id === activeThemeId()) ?? themes()[0]);
+/** 当前主题的唯一解析结果，预览、差异与导出都从这里读取 */
+const resolvedActive = createMemo(() => resolveTheme(activeTheme()));
 
 createEffect(() => {
   localStorage.setItem(
@@ -106,11 +121,95 @@ function updateTheme(themeId: string, updater: (theme: Theme) => Theme): void {
 
 export function useTokenStore() {
   const updateToken = (kind: TokenKind, id: string, patch: Partial<DesignToken>): void => {
+    updateTheme(activeThemeId(), (theme) => {
+      const target = theme.tokens[kind].find((token) => token.id === id);
+      if (!target) return theme;
+      const valueChanged = patch.value !== undefined && patch.value !== target.value;
+      let next: Theme = {
+        ...theme,
+        tokens: {
+          ...theme.tokens,
+          [kind]: theme.tokens[kind].map((token) => {
+            if (token.id !== id) return token;
+            const merged = { ...token, ...patch };
+            // 手动修改覆盖值，视为已完成本轮复核
+            if (valueChanged && merged.override) merged.needsReview = false;
+            return merged;
+          }),
+        },
+      };
+      if (valueChanged) {
+        // 基础令牌改动：未覆盖的别名在解析时自动重算，
+        // 显式覆盖的下游别名保留原值并标记待复核
+        const dependents = findOverrideDependents(next, new Set([target.name]));
+        if (dependents.length) {
+          const marked = new Set(dependents.map((item) => `${item.kind}:${item.id}`));
+          const tokens = { ...next.tokens };
+          TOKEN_KINDS.forEach((tokenKind) => {
+            tokens[tokenKind] = tokens[tokenKind].map((token) =>
+              marked.has(`${tokenKind}:${token.id}`) ? { ...token, needsReview: true } : token,
+            );
+          });
+          next = { ...next, tokens };
+        }
+      }
+      return next;
+    });
+  };
+
+  const setTokenRef = (kind: TokenKind, id: string, ref?: string): void => {
+    updateTheme(activeThemeId(), (theme) => {
+      const resolved = resolveTheme(theme);
+      return {
+        ...theme,
+        tokens: {
+          ...theme.tokens,
+          [kind]: theme.tokens[kind].map((token) => {
+            if (token.id !== id) return token;
+            const next = { ...token };
+            if (ref) {
+              next.ref = ref;
+              next.override = false;
+              next.needsReview = false;
+              next.value = resolved.byName[ref]?.resolvedValue ?? token.value;
+            } else {
+              // 取消引用时把当前解析值固化成字面量
+              next.value = resolved.byId[id]?.resolvedValue ?? token.value;
+              delete next.ref;
+              delete next.override;
+              delete next.needsReview;
+            }
+            return next;
+          }),
+        },
+      };
+    });
+  };
+
+  const toggleOverride = (kind: TokenKind, id: string, override: boolean): void => {
+    updateTheme(activeThemeId(), (theme) => {
+      const resolved = resolveTheme(theme);
+      return {
+        ...theme,
+        tokens: {
+          ...theme.tokens,
+          [kind]: theme.tokens[kind].map((token) => {
+            if (token.id !== id || !token.ref) return token;
+            const next = { ...token, override, needsReview: false };
+            if (!override) next.value = resolved.byName[token.ref]?.resolvedValue ?? token.value;
+            return next;
+          }),
+        },
+      };
+    });
+  };
+
+  const acknowledgeReview = (kind: TokenKind, id: string): void => {
     updateTheme(activeThemeId(), (theme) => ({
       ...theme,
       tokens: {
         ...theme.tokens,
-        [kind]: theme.tokens[kind].map((token) => (token.id === id ? { ...token, ...patch } : token)),
+        [kind]: theme.tokens[kind].map((token) => (token.id === id ? { ...token, needsReview: false } : token)),
       },
     }));
   };
@@ -159,7 +258,7 @@ export function useTokenStore() {
   };
 
   const replaceTheme = (theme: Theme): void => {
-    setThemes((current) => [...current, theme]);
+    setThemes((current) => [...current, migrateTheme(theme)]);
     setActiveThemeId(theme.id);
   };
 
@@ -167,9 +266,13 @@ export function useTokenStore() {
     themes,
     activeTheme,
     activeThemeId,
+    resolvedActive,
     setActiveThemeId,
     snapshots,
     updateToken,
+    setTokenRef,
+    toggleOverride,
+    acknowledgeReview,
     addToken,
     removeToken,
     createTheme,
